@@ -1,0 +1,14 @@
+{
+  "defaults": {
+    "music": true,
+    "sound": true,
+    "vibration": true,
+    "theme": "auto",
+    "grid": 3,
+    "style": "number",
+    "mode": "classic",
+    "preset": 1,
+    "showNumbers": true,
+    "language": "en"
+  }
+}
