@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#c68a3f">
+<link rel="manifest" href="manifest.json">
+<title>Board Puzzle — Game</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <div class="game-top">
+    <button class="icon-btn" id="btnExit" aria-label="Exit"></button>
+    <div class="game-stats">
+      <div class="stat"><span>Moves</span><b id="statMoves">0</b></div>
+      <div class="stat"><span>Time</span><b id="statTime">00:00</b></div>
+    </div>
+    <button class="icon-btn" id="btnPause" aria-label="Pause"></button>
+  </div>
+
+  <div class="game-board-wrap" id="gameBoardWrap"></div>
+  <div class="game-meta" id="gameMeta">3×3 • Classic</div>
+
+  <div class="game-actions">
+    <button class="act" id="actShuffle"><span id="iShuffle"></span>Shuffle</button>
+    <button class="act" id="actUndo"><span id="iUndo"></span>Undo</button>
+    <button class="act" id="actRedo"><span id="iRedo"></span>Redo</button>
+    <button class="act" id="actNum"><span id="iNum"></span><span id="lNum">Numbers</span></button>
+  </div>
+</div>
+
+<!-- Win modal -->
+<div class="modal" id="winModal">
+  <div class="modal-card">
+    <img class="trophy" src="assets/images/trophy.png" alt="Trophy">
+    <h2>Congratulations!</h2>
+    <div class="newrec" id="newRec" style="display:none">NEW RECORD</div>
+    <div class="stats">
+      <div class="s"><span>Moves</span><b id="wMoves">0</b></div>
+      <div class="s"><span>Time</span><b id="wTime">00:00</b></div>
+      <div class="s"><span>Grid</span><b id="wGrid">3×3</b></div>
+      <div class="s"><span>Mode</span><b id="wMode">Classic</b></div>
+    </div>
+    <div class="actions">
+      <button class="btn primary" id="wAgain">Play Again</button>
+      <button class="btn" id="wHome">Home</button>
+      <button class="btn" id="wShare">Share</button>
+    </div>
+  </div>
+</div>
+
+<script src="storage.js"></script>
+<script src="ui.js"></script>
+<script src="game.js"></script>
+<script src="preview.js"></script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+</script>
+<script>
+/* ==================================================================
+   Board Puzzle — Game Screen Controller
+   ================================================================== */
+(function(){
+  const S = window.PuzzleStorage, UI = window.PuzzleUI, G = window.PuzzleGame, P = window.PuzzlePreview;
+
+  // Icons
+  document.getElementById("btnExit").innerHTML = UI.icon("exit");
+  document.getElementById("btnPause").innerHTML = UI.icon("pause");
+  document.getElementById("iShuffle").innerHTML = UI.icon("shuffle");
+  document.getElementById("iUndo").innerHTML = UI.icon("undo");
+  document.getElementById("iRedo").innerHTML = UI.icon("redo");
+
+  UI.applyTheme(S.get().settings.theme);
+
+  // Determine game params — from resume or fresh
+  const params = new URLSearchParams(location.search);
+  const resume = params.get("resume") === "1";
+  const settings = S.get().settings;
+
+  let n = settings.grid;
+  let style = settings.style;
+  let mode = settings.mode;
+  let preset = settings.preset;
+  let photo = null; // custom uploaded photo (dataURL) — reload from storage
+  let showNumbers = settings.showNumbers;
+  let solved, board, history = [], future = [];
+  let moves = 0, startTime = Date.now(), elapsed = 0, timer = null, paused = false;
+
+  const saved = S.get().currentGame;
+  if (resume && saved) {
+    n = saved.n; style = saved.style; mode = saved.mode; preset = saved.preset;
+    board = saved.board.slice(); solved = saved.solved.slice();
+    moves = saved.moves || 0; elapsed = saved.elapsed || 0;
+    photo = saved.photo || null; showNumbers = saved.showNumbers ?? true;
+    history = saved.history || []; future = saved.future || [];
+  } else {
+    solved = style === "photo" ? G.solvedPhoto(n) : G.solvedFor(mode, n);
+    board = G.shuffle(solved, n, 60 * n);
+  }
+
+  const wrap = document.getElementById("gameBoardWrap");
+  const boardSize = Math.min(window.innerWidth - 40, 440);
+
+  function labelMode() {
+    if (style === "photo") {
+      const names = ["Raj","Ronit","Aradhya","Lovely","Biklu"];
+      return names[preset - 1] || "Photo";
+    }
+    return mode.charAt(0).toUpperCase() + mode.slice(1);
+  }
+  document.getElementById("gameMeta").textContent = `${n}×${n} • ${labelMode()}`;
+
+  // Toggle numbers UI (only for photo)
+  const actNum = document.getElementById("actNum");
+  if (style !== "photo") actNum.style.display = "none";
+  document.getElementById("iNum").innerHTML = UI.icon(showNumbers ? "eye" : "eyeOff");
+
+  function draw(){
+    P.renderBoard(wrap, {
+      board, n, style, mode, preset, photo, showNumbers,
+      size: boardSize, interactive: true
+    });
+    // Attach tap + directional swipe handling once; survives re-renders.
+    P.attachSwipe(wrap, () => ({ board, n }), attemptMove);
+  }
+
+  function updateStats(){
+    document.getElementById("statMoves").textContent = moves;
+    document.getElementById("statTime").textContent = UI.formatTime(Math.floor(elapsed));
+  }
+
+  function tick(){ if (!paused){ elapsed++; updateStats(); saveState(); } }
+  function startTimer(){ if (timer) clearInterval(timer); timer = setInterval(tick, 1000); }
+
+  function saveState(){
+    S.setCurrentGame({ n, style, mode, preset, board, solved, moves, elapsed, photo, showNumbers, history, future });
+  }
+
+  function attemptMove(i){
+    if (paused) return;
+    const next = G.tryMove(board, n, i);
+    if (!next) return;
+    history.push(board.slice());
+    future = [];
+    board = next;
+    moves++;
+    UI.playSound("move"); UI.vibrate(12);
+    draw(); updateStats(); saveState();
+    if (G.isSolved(board, solved)) onWin();
+  }
+
+  function onWin(){
+    clearInterval(timer);
+    const rec = S.recordWin({ grid: n, mode: labelMode(), moves, time: Math.floor(elapsed) });
+    S.clearCurrentGame();
+
+    // Achievements
+    S.unlock("first_win");
+    if (style === "photo") S.unlock("photo_master");
+    if (n === 5) S.unlock("grand_master");
+    if (n === 3 && elapsed < 30) S.unlock("speed_demon");
+    if (n === 3 && moves < 50) S.unlock("efficient");
+    if (S.get().stats.currentStreak >= 5) S.unlock("streak_5");
+    if (S.get().stats.currentStreak >= 10) S.unlock("streak_10");
+    if (S.get().stats.played >= 100) S.unlock("century");
+
+    UI.confetti(90);
+    document.getElementById("wMoves").textContent = moves;
+    document.getElementById("wTime").textContent = UI.formatTime(Math.floor(elapsed));
+    document.getElementById("wGrid").textContent = `${n}×${n}`;
+    document.getElementById("wMode").textContent = labelMode();
+    document.getElementById("newRec").style.display = (rec.isBestTime || rec.isBestMoves) ? "inline-block" : "none";
+    document.getElementById("winModal").classList.add("show");
+  }
+
+  // Actions
+  document.getElementById("actShuffle").onclick = () => {
+    UI.playSound("click"); UI.vibrate(20);
+    board = G.shuffle(solved, n, 60 * n);
+    moves = 0; elapsed = 0; history = []; future = [];
+    draw(); updateStats(); saveState();
+  };
+  document.getElementById("actUndo").onclick = () => {
+    if (!history.length) return;
+    UI.playSound("click");
+    future.push(board.slice());
+    board = history.pop();
+    moves = Math.max(0, moves - 1);
+    draw(); updateStats(); saveState();
+  };
+  document.getElementById("actRedo").onclick = () => {
+    if (!future.length) return;
+    UI.playSound("click");
+    history.push(board.slice());
+    board = future.pop();
+    moves++;
+    draw(); updateStats(); saveState();
+  };
+  actNum.onclick = () => {
+    showNumbers = !showNumbers;
+    document.getElementById("iNum").innerHTML = UI.icon(showNumbers ? "eye" : "eyeOff");
+    UI.playSound("click");
+    draw(); saveState();
+  };
+
+  document.getElementById("btnExit").onclick = () => { UI.playSound("click"); saveState(); location.href = "index.html"; };
+  document.getElementById("btnPause").onclick = () => {
+    paused = !paused;
+    UI.toast(paused ? "Paused" : "Resumed");
+    UI.playSound("click");
+  };
+
+  // Win modal actions
+  document.getElementById("wAgain").onclick = () => location.reload();
+  document.getElementById("wHome").onclick = () => location.href = "index.html";
+  document.getElementById("wShare").onclick = async () => {
+    UI.playSound("click");
+    const text = `I solved a ${n}×${n} Board Puzzle in ${moves} moves & ${UI.formatTime(Math.floor(elapsed))}! I'll add link later.`;
+    if (navigator.share) { try { await navigator.share({ text }); } catch{} }
+    else { try { await navigator.clipboard.writeText(text); UI.toast("Copied to clipboard"); } catch { UI.toast(text); } }
+  };
+
+  draw(); updateStats(); startTimer();
+})();
+</script>
+</body>
+</html>
