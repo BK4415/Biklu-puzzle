@@ -1,0 +1,26 @@
+{
+  "themes": {
+    "wooden": {
+      "name": "Wooden",
+      "bg": "#f6e9cf",
+      "bg2": "#e6cf9c",
+      "board": "#7a4a1e",
+      "boardInner": "#a56a2c",
+      "tile": "#e6c184",
+      "tileEdge": "#b57a35",
+      "text": "#3a1f0a",
+      "accent": "#c68a3f"
+    },
+    "darkWooden": {
+      "name": "Dark Wooden",
+      "bg": "#1a1108",
+      "bg2": "#2b1a0f",
+      "board": "#3a230f",
+      "boardInner": "#5a3517",
+      "tile": "#8a5a2a",
+      "tileEdge": "#5a3517",
+      "text": "#f4e6c9",
+      "accent": "#e0a75e"
+    }
+  }
+}
